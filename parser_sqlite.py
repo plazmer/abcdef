@@ -11,13 +11,12 @@ to directory .\ABCDEF\*.csv
 
 
 import math
-from lxml import html #,etree
+from lxml import html, etree
 import os, sys
 import csv
 import sqlite3
 
-alias={'date': 1, 'time': 2, 'tel': 4, 'len': 9, 'cost': 10}
-abcdef = os.path.join(os.getcwd(),'abcdef')
+alias={'date': 1, 'time': 2, 'tel': 4, 'zone': 6, 'len': 9, 'cost': 10}
 
 fed_okrug = {}
 with open('federal_okrug.txt', encoding='utf8') as f:
@@ -29,11 +28,13 @@ with open('federal_okrug.txt', encoding='utf8') as f:
 conn = sqlite3.connect('abcdef.db')
 conn.row_factory = sqlite3.Row
 
+
 def create_tables():
     c = conn.cursor()
     c.execute('''DROP TABLE IF EXISTS codes;''')
     c.execute('''CREATE TABLE codes (`from` int, `to` int, `reg` text, `city` text, PRIMARY KEY (`from`,`to`));''')
     conn.commit()
+
 
 def check_data():
     c = conn.cursor()
@@ -46,6 +47,7 @@ def check_data():
     except:
         pass
     return result
+
 
 def get_region(tel):
 
@@ -84,6 +86,7 @@ def load_abcdef():
 
     conn.isolation_level = tmp
 
+    abcdef = os.path.join(os.getcwd(), 'abcdef')
     for fname in os.listdir(abcdef):
         print(abcdef, fname)
         fp = open(os.path.join(abcdef,fname),'r',encoding='utf8')
@@ -114,6 +117,7 @@ def load_abcdef():
                 print(sys.exc_info())
                 print(sys.last_traceback)
                 pass
+        fp.close()
         conn.commit()
 
 
@@ -129,46 +133,63 @@ def analyze_files():
 def analyze_string(page):
     calls = []
     tree = html.fromstring(page)
-    tables = tree.xpath('//table[@width=770 and @border=2]')
-    for table in tables:
-        tbody = table.xpath('tbody/tr')
-        for tr in tbody:
-            tds = tr.xpath('td')
-            tmp={}
-            for a in alias.keys():
-                tmp[a] = tds[alias[a]].text
-            if len(tmp.keys()) < len(alias.keys()):
-                print("no keys")
-                continue
-            lenm,lens=tmp['len'].split(':')
-            len_sec=int(lenm)*60+int(lens)
-            if len_sec <= 3:
-                len_min=0
-            else:
-                len_min=len_sec/60
-                if math.trunc(len_min) < len_min:
-                    len_min = math.trunc(len_sec / 60) + 1
+    main_tables = tree.xpath('//body/table')
+    print(len(main_tables))
+    for main_table in main_tables:
+        tables = main_table.xpath('.//table[@width=770 and @border=2]')
+        numer_from = 'unknown'
+        if len(tables) == 0:
+            continue
+
+        table_numer = main_table.xpath('.//table[@width=770 and @border=0]/tr/td[1]/text()')
+        #print(etree.tostring(table_numer[0]))
+        if len(table_numer) > 0:
+            numer_from = table_numer[0].split(' ')[-1]
+
+
+
+        for table in tables:
+            tbody = table.xpath('tbody/tr')
+            for tr in tbody:
+                tds = tr.xpath('td')
+                tmp = {}
+                tmp['from'] = numer_from
+
+                for a in alias.keys():
+                    tmp[a] = tds[alias[a]].text
+                if len(tmp.keys()) < len(alias.keys()):
+                    print("no keys")
+                    continue
+                lenm,lens=tmp['len'].split(':')
+                len_sec=int(lenm)*60+int(lens)
+                if len_sec <= 3:
+                    len_min=0
                 else:
-                    len_min = math.trunc(len_sec / 60)
-            tmp['minutes'] = int(len_min)
-            reg = get_region(tmp['tel'])
-            tmp['region'] = reg.get('reg')
+                    len_min=len_sec/60
+                    if math.trunc(len_min) < len_min:
+                        len_min = math.trunc(len_sec / 60) + 1
+                    else:
+                        len_min = math.trunc(len_sec / 60)
+                tmp['minutes'] = int(len_min)
+                reg = get_region(tmp['tel'])
+                tmp['region'] = reg.get('reg')
 
-            try:
-                tmp['cost'] = float(tmp['cost'].replace(',','.'))
-            except:
-                tmp['cost'] = 0.0
+                try:
+                    tmp['cost'] = float(tmp['cost'].replace(',','.'))
+                except:
+                    tmp['cost'] = 0.0
 
-            if tmp['minutes'] > 0:
-                tmp['per_minute'] = round(tmp['cost'] / int(tmp['minutes']), 4)
-            else:
-                tmp['per_minute'] = 0
+                if tmp['minutes'] > 0:
+                    tmp['per_minute'] = round(tmp['cost'] / int(tmp['minutes']), 4)
+                else:
+                    tmp['per_minute'] = 0
 
-            tmp['okrug'] = fed_okrug.get(tmp['region'],'None')
+                tmp['okrug'] = fed_okrug.get(tmp['region'],'None')
 
+                calls.append(tmp)
 
-            calls.append(tmp)
     return calls
+
 
 def analyze_calls(calls):
     full_cost = 0
@@ -193,6 +214,7 @@ def analyze_calls(calls):
     svodny['ITOGO']['cost'] = full_cost
     svodny['ITOGO']['minutes'] = full_minutes
     return svodny
+
 
 def render_calls_svodny(calls):
     svodny = analyze_calls(calls)
@@ -244,7 +266,7 @@ def render_calls_svodny(calls):
 
 def render_calls(calls):
     html = ''
-    headers = ['date','time','tel','region','minutes','cost', 'per_minute']
+    headers = ['date','time','from','tel','zone','region','minutes','cost']
     html += '<h3>Исходные данные</h3>'
     html += '<table border="2"><tr>'
     for h in headers:
@@ -267,5 +289,6 @@ def render_calls(calls):
 if __name__ == "__main__":
     #print(len('73452468073'))
     #print(len('+73452468073'))
-    analyze_string(open('1.html','r',encoding='utf8').read())
+    calls = analyze_string(open('r:/1.html','r',encoding='utf8').read())
+
 

@@ -14,6 +14,10 @@ import parser_sqlite
 
 @get('/')
 def index():
+    if not parser_sqlite.check_data():
+        parser_sqlite.create_tables()
+        parser_sqlite.load_abcdef()
+
     return template('static/index.html')
     """<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1251"></head>
     <body>
